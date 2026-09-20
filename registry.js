@@ -8,6 +8,10 @@ const FileCopyFlags = Gio.FileCopyFlags;
 const FileTest = GLib.FileTest;
 
 export class Registry {
+    #pendingEntries = null;
+    #writeScheduledId = 0;
+    #writeInProgress = false;
+
     constructor ({ settings, uuid }) {
         this.uuid = uuid;
         this.settings = settings;
@@ -18,6 +22,49 @@ export class Registry {
     }
 
     write (entries) {
+        // Keep only the newest snapshot. UI actions can request several writes in
+        // one main-loop iteration, and persisting every intermediate state both
+        // blocks GNOME Shell during serialization and allows stale async writes
+        // to finish last.
+        this.#pendingEntries = entries.slice();
+        this.#scheduleWrite();
+    }
+
+    #scheduleWrite () {
+        if (this.#writeScheduledId !== 0 || this.#writeInProgress) return;
+
+        this.#writeScheduledId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this.#writeScheduledId = 0;
+            this.#drainWrites();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    async #drainWrites () {
+        if (this.#writeInProgress) return;
+
+        this.#writeInProgress = true;
+        try {
+            // A write requested while I/O is in progress replaces the pending
+            // snapshot and is persisted after the current write. This preserves
+            // ordering while coalescing transient states.
+            while (this.#pendingEntries !== null) {
+                const entries = this.#pendingEntries;
+                this.#pendingEntries = null;
+                await this.writeToFile(this.#buildRegistry(entries));
+            }
+        }
+        catch (e) {
+            console.error('Clipboard Indicator: failed to write registry file');
+            console.error(e);
+        }
+        finally {
+            this.#writeInProgress = false;
+            if (this.#pendingEntries !== null) this.#scheduleWrite();
+        }
+    }
+
+    #buildRegistry (entries) {
         const registryContent = [];
 
         for (let entry of entries) {
@@ -40,28 +87,57 @@ export class Registry {
             if (entry.getTag()) item.tag = entry.getTag();
         }
 
-        this.writeToFile(registryContent);
+        return registryContent;
     }
 
     writeToFile (registry) {
-        let json = JSON.stringify(registry);
-        let contents = new GLib.Bytes(json);
+        const json = JSON.stringify(registry);
+        const contents = new GLib.Bytes(json);
 
         // Make sure dir exists
         GLib.mkdir_with_parents(this.REGISTRY_DIR, parseInt('0775', 8));
 
-        // Write contents to file asynchronously
-        let file = Gio.file_new_for_path(this.REGISTRY_PATH);
-        file.replace_async(null, false, Gio.FileCreateFlags.NONE,
-                            GLib.PRIORITY_DEFAULT, null, (obj, res) => {
+        const file = Gio.file_new_for_path(this.REGISTRY_PATH);
+        return new Promise((resolve, reject) => {
+            file.replace_async(null, false, Gio.FileCreateFlags.NONE,
+                               GLib.PRIORITY_DEFAULT, null, (obj, res) => {
+                let stream;
+                try {
+                    stream = obj.replace_finish(res);
+                }
+                catch (e) {
+                    reject(e);
+                    return;
+                }
 
-            let stream = obj.replace_finish(res);
-
-            stream.write_bytes_async(contents, GLib.PRIORITY_DEFAULT,
-                                null, (w_obj, w_res) => {
-
-                w_obj.write_bytes_finish(w_res);
-                stream.close(null);
+                try {
+                    stream.write_bytes_async(contents, GLib.PRIORITY_DEFAULT,
+                                             null, (writeStream, writeResult) => {
+                        try {
+                            writeStream.write_bytes_finish(writeResult);
+                            stream.close(null);
+                            resolve();
+                        }
+                        catch (e) {
+                            try {
+                                stream.close(null);
+                            }
+                            catch {
+                                // Preserve the original write error.
+                            }
+                            reject(e);
+                        }
+                    });
+                }
+                catch (e) {
+                    try {
+                        stream.close(null);
+                    }
+                    catch {
+                        // Preserve the original write error.
+                    }
+                    reject(e);
+                }
             });
         });
     }
@@ -227,6 +303,7 @@ export class ClipboardEntry {
     #mimetype;
     #bytes;
     #favorite;
+    #stringValue = null;
 
     static #decode (contents) {
         return Uint8Array.from(contents.match(/.{1,2}/g).map((byte) => parseInt(byte, 16)));
@@ -305,7 +382,11 @@ export class ClipboardEntry {
         if (this.isImage()) {
             return `[Image ${this.asBytes().hash()}]`;
         }
-        return new TextDecoder().decode(this.#bytes);
+
+        if (this.#stringValue === null) {
+            this.#stringValue = new TextDecoder().decode(this.#bytes);
+        }
+        return this.#stringValue;
     }
 
     mimetype () {
@@ -331,6 +412,7 @@ export class ClipboardEntry {
     setText (text) {
         if (!this.isText()) return;
         this.#bytes = new TextEncoder().encode(text);
+        this.#stringValue = text;
     }
 
     #tag = null;

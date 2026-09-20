@@ -1,7 +1,10 @@
-MODULES = *.js locale/*/LC_MESSAGES/*.mo metadata.json stylesheet.css LICENSE.rst README.rst schemas/
+MODULES = *.js locale/*/LC_MESSAGES/*.mo metadata.json stylesheet.css LICENSE.rst README.md schemas/
 INSTALLPATH=~/.local/share/gnome-shell/extensions/clipboard-indicator@tudmotu.com/
 
 all: compile-locales compile-settings
+
+test:
+	bash tests/run.sh
 
 compile-settings:
 	glib-compile-schemas --strict --targetdir=schemas/ schemas
