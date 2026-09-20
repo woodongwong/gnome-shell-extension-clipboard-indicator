@@ -628,7 +628,10 @@ const ClipboardIndicator = GObject.registerClass({
         // CLICK fix for Paste on Select: clicking behaves like Enter
         menuItem.connect('activate', () => {
             if (PASTE_ON_SELECT) {
-                this.#pasteItem(menuItem);
+                // Clicking a history row selects it. Keep that entry on the
+                // clipboard after the synthetic paste instead of restoring the
+                // item that was selected before the click.
+                this.#pasteItem(menuItem, menuItem.entry);
                 this._onMenuItemSelectedAndMenuClose(menuItem, false);
             } else {
                 this._onMenuItemSelectedAndMenuClose(menuItem, true);
@@ -683,7 +686,7 @@ const ClipboardIndicator = GObject.registerClass({
                 case Clutter.KEY_KP_Enter:
                 case Clutter.KEY_Return:
                     if (PASTE_ON_SELECT) {
-                        this.#pasteItem(menuItem);
+                        this.#pasteItem(menuItem, menuItem.entry);
                         this._onMenuItemSelectedAndMenuClose(menuItem, false);
                     } else {
                         this._onMenuItemSelectedAndMenuClose(menuItem, true);
@@ -983,6 +986,8 @@ const ClipboardIndicator = GObject.registerClass({
     }
 
     _onMenuItemSelectedAndMenuClose (menuItem, autoSet) {
+        const menu = menuItem.menu;
+
         for (let otherMenuItem of menuItem.radioGroup) {
             let clipContents = menuItem.clipContents;
 
@@ -1005,7 +1010,9 @@ const ClipboardIndicator = GObject.registerClass({
             this._moveItemFirst(menuItem);
         }
 
-        menuItem.menu.close();
+        // Moving the item destroys and recreates its menu actor, so use the
+        // stable menu reference captured before _moveItemFirst().
+        menu.close();
     }
 
     _getCache () {
@@ -1654,9 +1661,9 @@ const ClipboardIndicator = GObject.registerClass({
 
 
 
-    #pasteItem (menuItem) {
+    #pasteItem (menuItem, restoreEntry = null) {
         this.menu.close();
-        const currentlySelected = this._getCurrentlySelectedItem();
+        restoreEntry ??= this._getCurrentlySelectedItem()?.entry;
         this.preventIndicatorUpdate = true;
         this.#updateClipboard(menuItem.entry);
         this._pastingKeypressTimeout = setTimeout(() => {
@@ -1677,8 +1684,8 @@ const ClipboardIndicator = GObject.registerClass({
 
             this._pastingResetTimeout = setTimeout(() => {
                 this.preventIndicatorUpdate = false;
-                if (currentlySelected && currentlySelected.entry)
-                    this.#updateClipboard(currentlySelected.entry);
+                if (restoreEntry)
+                    this.#updateClipboard(restoreEntry);
             }, 50);
         }, 50);
     }
