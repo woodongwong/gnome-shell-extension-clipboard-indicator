@@ -402,6 +402,12 @@ const ClipboardIndicator = GObject.registerClass({
         // Add cached items
         clipHistory.forEach(entry => this._addEntry(entry));
 
+        // Persist one-time repairs of legacy text/plain entries so the cache is
+        // normalized after this load instead of repairing the same data forever.
+        if (clipHistory.some(entry => entry.wasNormalized())) {
+            this._updateCache();
+        }
+
         if (lastIdx >= 0) {
             this._selectMenuItem(clipItemsArr[lastIdx]);
         }

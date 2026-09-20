@@ -1,6 +1,6 @@
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
-import { Registry } from '../registry.js';
+import { ClipboardEntry, Registry, decodeEscapedUtf8 } from '../registry.js';
 
 function assert (condition, message) {
     if (!condition) throw new Error(message);
@@ -70,6 +70,30 @@ function persistedContents () {
 }
 
 try {
+    const escapedChinese = String.raw`\E9\97\AE\E9\A2\98 6\EF\BC\9A`;
+    assert(decodeEscapedUtf8(escapedChinese) === '问题 6：',
+        'valid escaped UTF-8 was not decoded');
+    assert(decodeEscapedUtf8(String.raw`C:\E9\docs`) === String.raw`C:\E9\docs`,
+        'invalid escaped UTF-8 should remain unchanged');
+    assert(decodeEscapedUtf8(String.raw`\41\42`) === String.raw`\41\42`,
+        'ASCII escapes should remain unchanged');
+
+    const repairedEntry = new ClipboardEntry(
+        'text/plain', new TextEncoder().encode(escapedChinese), false
+    );
+    assert(repairedEntry.getStringValue() === '问题 6：',
+        'text/plain entry was not repaired');
+    assert(repairedEntry.wasNormalized(),
+        'repaired entry was not marked for cache migration');
+
+    const literalEntry = new ClipboardEntry(
+        'text/plain;charset=utf-8', new TextEncoder().encode(escapedChinese), false
+    );
+    assert(literalEntry.getStringValue() === escapedChinese,
+        'explicit UTF-8 content should not be normalized');
+    assert(!literalEntry.wasNormalized(),
+        'unchanged entry was incorrectly marked as normalized');
+
     registry.write([new TestEntry('obsolete')]);
     registry.write([new TestEntry('coalesced')]);
 

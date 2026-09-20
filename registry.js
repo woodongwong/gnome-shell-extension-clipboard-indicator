@@ -6,6 +6,28 @@ import { PrefsFields } from './constants.js';
 const FileQueryInfoFlags = Gio.FileQueryInfoFlags;
 const FileCopyFlags = Gio.FileCopyFlags;
 const FileTest = GLib.FileTest;
+const escapedByteRun = /(?:\\[0-9A-Fa-f]{2})+/g;
+const escapedByte = /\\([0-9A-Fa-f]{2})/g;
+
+export function decodeEscapedUtf8 (text) {
+    return text.replace(escapedByteRun, run => {
+        const bytes = Uint8Array.from(
+            [...run.matchAll(escapedByte)], match => parseInt(match[1], 16)
+        );
+
+        try {
+            const decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+
+            // ASCII-only escapes commonly occur in paths and source code. The
+            // broken clipboard representation we repair encodes non-ASCII UTF-8.
+            return /[^\x00-\x7F]/u.test(decoded) ? decoded : run;
+        }
+        catch {
+            // An incomplete or non-UTF-8 run is ordinary user content.
+            return run;
+        }
+    });
+}
 
 export class Registry {
     #pendingEntries = null;
@@ -304,6 +326,7 @@ export class ClipboardEntry {
     #bytes;
     #favorite;
     #stringValue = null;
+    #wasNormalized = false;
 
     static #decode (contents) {
         return Uint8Array.from(contents.match(/.{1,2}/g).map((byte) => parseInt(byte, 16)));
@@ -366,6 +389,16 @@ export class ClipboardEntry {
         this.#mimetype = mimetype;
         this.#bytes = bytes;
         this.#favorite = favorite;
+
+        if (mimetype === 'text/plain') {
+            const decoded = new TextDecoder().decode(bytes);
+            const normalized = decodeEscapedUtf8(decoded);
+            if (normalized !== decoded) {
+                this.#bytes = new TextEncoder().encode(normalized);
+                this.#stringValue = normalized;
+                this.#wasNormalized = true;
+            }
+        }
     }
 
     #encode () {
@@ -397,6 +430,10 @@ export class ClipboardEntry {
         return this.#favorite;
     }
 
+    wasNormalized () {
+        return this.#wasNormalized;
+    }
+
     set favorite (val) {
         this.#favorite = !!val;
     }
@@ -413,6 +450,7 @@ export class ClipboardEntry {
         if (!this.isText()) return;
         this.#bytes = new TextEncoder().encode(text);
         this.#stringValue = text;
+        this.#wasNormalized = false;
     }
 
     #tag = null;
