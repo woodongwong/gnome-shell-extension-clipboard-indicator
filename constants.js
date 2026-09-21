@@ -25,7 +25,8 @@ export const PrefsFields = {
     BINDING_NEXT_ENTRY              : 'next-entry',
     BINDING_PRIVATE_MODE            : 'private-mode-binding',
     CLEAR_ON_BOOT                   : 'clear-on-boot',
-    PASTE_ON_SELECT                 : 'paste-on-select',
+    // Keep the existing schema key so current user settings migrate unchanged.
+    PASTE_ON_ENTER                  : 'paste-on-select',
     CACHE_IMAGES                    : 'cache-images',
     EXCLUDED_APPS                   : 'excluded-apps',
     CLEAR_HISTORY_ON_INTERVAL       : 'clear-history-on-interval',

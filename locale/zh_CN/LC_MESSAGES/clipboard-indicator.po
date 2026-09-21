@@ -338,12 +338,12 @@ msgid "Delete all cached clipboard entries when the system starts"
 msgstr ""
 
 #: prefs.js:167
-msgid "Paste on select"
-msgstr ""
+msgid "Paste on Enter"
+msgstr "按回车键粘贴"
 
 #: prefs.js:168
-msgid "Automatically paste the entry into the active window when selected"
-msgstr ""
+msgid "Automatically paste the selected entry when activated with Enter"
+msgstr "按回车键激活历史项时，自动将选中内容粘贴到当前窗口"
 
 #: prefs.js:172
 msgid "Open menu at cursor"

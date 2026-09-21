@@ -320,11 +320,11 @@ msgid "Delete all cached clipboard entries when the system starts"
 msgstr ""
 
 #: prefs.js:167
-msgid "Paste on select"
+msgid "Paste on Enter"
 msgstr ""
 
 #: prefs.js:168
-msgid "Automatically paste the entry into the active window when selected"
+msgid "Automatically paste the selected entry when activated with Enter"
 msgstr ""
 
 #: prefs.js:172

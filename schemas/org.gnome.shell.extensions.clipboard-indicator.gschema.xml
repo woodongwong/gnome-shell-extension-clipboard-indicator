@@ -80,7 +80,11 @@
 
     <key name="paste-on-select" type="b">
         <default>false</default>
-        <summary>Paste on select</summary>
+        <summary>Paste on Enter</summary>
+        <description>
+            If true, pressing Enter on a history entry selects and pastes it.
+            Pointer clicks and the Space key only select an entry.
+        </description>
     </key>
 
     <key type="i" name="preview-size">

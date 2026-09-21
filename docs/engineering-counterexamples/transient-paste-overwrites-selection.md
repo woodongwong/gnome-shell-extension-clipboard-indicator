@@ -1,29 +1,30 @@
-# Temporary paste state must not overwrite a new selection
+# Do not conflate selection with explicit paste
 
 ## Scenario and goal
 
-With “Paste on select” enabled, clicking a history row should paste that entry and leave the clicked entry selected. Clicking the dedicated paste button should paste without changing the current selection.
+Clipboard history supports two distinct actions: selecting an entry as the active clipboard value and explicitly pasting an entry into the focused application. Pointer clicks and Space should select; the paste button and `V` should paste; Enter may paste when the corresponding preference is enabled.
 
 ## Wrong choice and consequence
 
-The row-click path captured the previously selected entry, temporarily put the clicked entry on the clipboard, marked it selected, and then restored the previous entry after the synthetic paste. The clipboard listener treated that restoration as a new selection event, so the user's new selection was reverted.
+The row activation path treated every activation source as a paste request. As a result, a pointer click or Space sent a synthetic paste to the focused application when the user only intended to change the clipboard selection. Earlier cleanup also restored the previous clipboard entry after a row activation, which could revert the newly selected item.
 
 ## Better approach and signals
 
-The caller that owns the interaction semantics must explicitly choose the post-paste clipboard state:
+Determine behavior from the activation source instead of sharing one unconditional action:
 
-- Row activation and Enter restore the clicked entry because they are selection actions.
-- The dedicated paste button restores the prior selected entry because it is only a paste action.
+- Pointer activation, accessibility activation, and Space update the selection without synthesizing a paste.
+- Enter can select and paste when the preference is enabled, leaving the selected entry authoritative afterward.
+- The dedicated paste button and `V` paste without changing the current selection, so their delayed cleanup restores the prior selected entry.
 - Delayed cleanup must restore the state that is authoritative after the operation, not blindly restore the state captured before the operation.
 
 When a feature temporarily mutates observable state and an event listener derives UI state from it, verify the full event sequence through the delayed cleanup, not only the synchronous selection update.
 
 ## Boundary
 
-Restoring the pre-operation value is correct for temporary actions that explicitly promise not to change selection. It is incorrect when the same action also represents a user selection.
+Restoring the pre-operation value is correct for explicit paste-only actions that promise not to change selection. It is incorrect for an action that also changes the active clipboard item. Applications that intentionally define click or Space as immediate paste may choose different bindings, but the distinction should remain explicit.
 
 ## Evidence and status
 
-- Date: 2026-09-20
-- Status: confirmed by user report and code-path analysis; fix deployed, awaiting user interaction confirmation.
-- Relevant code: `extension.js`, row activation and `#pasteItem()`.
+- Date: 2026-09-21
+- Status: confirmed by the user's requested interaction and code-path analysis; click/Space behavior implemented and current setting applied, awaiting post-login interaction confirmation of the new source code.
+- Relevant code: `extension.js`, row activation, Enter handling, and `#pasteItem()`.

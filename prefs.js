@@ -163,9 +163,9 @@ class Settings {
             subtitle: _("Delete all cached clipboard entries when the system starts")
         });
 
-        this.field_paste_on_select = new Adw.SwitchRow({
-            title: _("Paste on select"),
-            subtitle: _("Automatically paste the entry into the active window when selected")
+        this.field_paste_on_enter = new Adw.SwitchRow({
+            title: _("Paste on Enter"),
+            subtitle: _("Automatically paste the selected entry when activated with Enter")
         });
 
         this.field_open_at_cursor = new Adw.SwitchRow({
@@ -281,7 +281,7 @@ class Settings {
         this.behavior.add(this.field_move_item_first);
         this.behavior.add(this.field_keep_selected_on_clear);
         this.behavior.add(this.field_open_at_cursor);
-        this.behavior.add(this.field_paste_on_select);
+        this.behavior.add(this.field_paste_on_enter);
         this.behavior.add(this.field_cache_images);
         this.behavior.add(this.field_clear_on_boot);
         this.behavior.add(this.field_clear_history_on_interval);
@@ -339,7 +339,7 @@ class Settings {
         this.schema.bind(PrefsFields.SHOW_CLEAR_HISTORY_BUTTON, this.field_show_clear_history_button, 'active', Gio.SettingsBindFlags.DEFAULT);
         this.schema.bind(PrefsFields.ENABLE_KEYBINDING, this.field_keybinding_activation, 'active', Gio.SettingsBindFlags.DEFAULT);
         this.schema.bind(PrefsFields.CLEAR_ON_BOOT, this.field_clear_on_boot, 'active', Gio.SettingsBindFlags.DEFAULT);
-        this.schema.bind(PrefsFields.PASTE_ON_SELECT, this.field_paste_on_select, 'active', Gio.SettingsBindFlags.DEFAULT);
+        this.schema.bind(PrefsFields.PASTE_ON_ENTER, this.field_paste_on_enter, 'active', Gio.SettingsBindFlags.DEFAULT);
         this.schema.bind(PrefsFields.OPEN_AT_CURSOR, this.field_open_at_cursor, 'active', Gio.SettingsBindFlags.DEFAULT);
         this.schema.bind(PrefsFields.CACHE_IMAGES, this.field_cache_images, 'active', Gio.SettingsBindFlags.DEFAULT);
         this.schema.bind(PrefsFields.CLEAR_HISTORY_ON_INTERVAL, this.field_clear_history_on_interval, 'active', Gio.SettingsBindFlags.DEFAULT);

@@ -38,7 +38,7 @@ let CONFIRM_ON_PINNED_DELETE  = false;
 let MAX_TOPBAR_LENGTH         = 15;
 let TOPBAR_DISPLAY_MODE       = 1; //0 - only icon, 1 - only clipboard content, 2 - both, 3 - neither
 let CLEAR_ON_BOOT             = false;
-let PASTE_ON_SELECT           = false;
+let PASTE_ON_ENTER            = false;
 let DISABLE_DOWN_ARROW        = false;
 let BLINK_ICON_ON_COPY        = false;
 let STRIP_TEXT                = false;
@@ -631,12 +631,13 @@ const ClipboardIndicator = GObject.registerClass({
         menuItem.clipContents = entry.getStringValue();
         menuItem.radioGroup = this.clipItemsRadioGroup;
 
-        // CLICK fix for Paste on Select: clicking behaves like Enter
-        menuItem.connect('activate', () => {
-            if (PASTE_ON_SELECT) {
-                // Clicking a history row selects it. Keep that entry on the
-                // clipboard after the synthetic paste instead of restoring the
-                // item that was selected before the click.
+        // Pointer activation and Space are selection actions. Only Enter may
+        // opt into the synthetic paste behavior.
+        menuItem.connect('activate', (_item, event) => {
+            const isEnterKey = event?.type() === Clutter.EventType.KEY_PRESS &&
+                [Clutter.KEY_Return, Clutter.KEY_KP_Enter].includes(event.get_key_symbol());
+
+            if (PASTE_ON_ENTER && isEnterKey) {
                 this.#pasteItem(menuItem, menuItem.entry);
                 this._onMenuItemSelectedAndMenuClose(menuItem, false);
             } else {
@@ -690,8 +691,7 @@ const ClipboardIndicator = GObject.registerClass({
                     this.#showTagDialog(menuItem, true);
                     return Clutter.EVENT_STOP;
                 case Clutter.KEY_KP_Enter:
-                case Clutter.KEY_Return:
-                    if (PASTE_ON_SELECT) {
+                    if (PASTE_ON_ENTER) {
                         this.#pasteItem(menuItem, menuItem.entry);
                         this._onMenuItemSelectedAndMenuClose(menuItem, false);
                     } else {
@@ -1011,8 +1011,9 @@ const ClipboardIndicator = GObject.registerClass({
             }
         }
 
-        // Ensure MOVE_ITEM_FIRST also applies when PASTE_ON_SELECT fast-path skips _refreshIndicator()
-        if (PASTE_ON_SELECT && MOVE_ITEM_FIRST && !menuItem.entry.isFavorite()) {
+        // The Enter-to-paste path does not update the clipboard through the
+        // normal selection flow, so move the selected item explicitly.
+        if (autoSet === false && MOVE_ITEM_FIRST && !menuItem.entry.isFavorite()) {
             this._moveItemFirst(menuItem);
         }
 
@@ -1431,7 +1432,7 @@ const ClipboardIndicator = GObject.registerClass({
         MAX_TOPBAR_LENGTH           = settings.get_int(PrefsFields.TOPBAR_PREVIEW_SIZE);
         TOPBAR_DISPLAY_MODE         = settings.get_int(PrefsFields.TOPBAR_DISPLAY_MODE_ID);
         CLEAR_ON_BOOT               = settings.get_boolean(PrefsFields.CLEAR_ON_BOOT);
-        PASTE_ON_SELECT             = settings.get_boolean(PrefsFields.PASTE_ON_SELECT);
+        PASTE_ON_ENTER              = settings.get_boolean(PrefsFields.PASTE_ON_ENTER);
         DISABLE_DOWN_ARROW          = settings.get_boolean(PrefsFields.DISABLE_DOWN_ARROW);
         BLINK_ICON_ON_COPY          = settings.get_boolean(PrefsFields.BLINK_ICON_ON_COPY);
         STRIP_TEXT                  = settings.get_boolean(PrefsFields.STRIP_TEXT);
