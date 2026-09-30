@@ -16,6 +16,7 @@ mutter_dir="$(dirname "$mutter_typelib")"
 
 node --input-type=module --check < "$project_dir/registry.js"
 node --input-type=module --check < "$project_dir/extension.js"
+node "$project_dir/tests/history.test.js"
 
 GI_TYPELIB_PATH="$gnome_shell_dir:$mutter_dir${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}" \
     gjs -m "$project_dir/tests/registry.test.js"

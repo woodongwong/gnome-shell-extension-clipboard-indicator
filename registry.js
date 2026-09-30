@@ -9,6 +9,71 @@ const FileTest = GLib.FileTest;
 const escapedByteRun = /(?:\\[0-9A-Fa-f]{2})+/g;
 const escapedByte = /\\([0-9A-Fa-f]{2})/g;
 
+const JSON_CHUNK_SIZE = 16 * 1024;
+
+function* registryJsonTokens (registry) {
+    yield '[';
+    for (let i = 0; i < registry.length; i++) {
+        yield i === 0 ? '{' : ',{';
+        let separator = '';
+        for (const [key, value] of Object.entries(registry[i])) {
+            if (value === undefined) continue;
+            yield separator + JSON.stringify(key) + ':';
+            separator = ',';
+            if (typeof value !== 'string') {
+                yield JSON.stringify(value);
+                continue;
+            }
+
+            yield '"';
+            for (let start = 0; start < value.length;) {
+                let end = Math.min(start + JSON_CHUNK_SIZE, value.length);
+                // Keep surrogate pairs together; otherwise JSON.stringify
+                // would escape the two halves instead of the original emoji.
+                if (end < value.length && /[\uD800-\uDBFF]/u.test(value[end - 1])) end--;
+                yield JSON.stringify(value.slice(start, end)).slice(1, -1);
+                start = end;
+            }
+            yield '"';
+        }
+        yield '}';
+    }
+    yield ']';
+}
+
+export function* serializeRegistryChunks (registry) {
+    let buffer = '';
+    for (const token of registryJsonTokens(registry)) {
+        for (let offset = 0; offset < token.length;) {
+            let length = Math.min(JSON_CHUNK_SIZE - buffer.length, token.length - offset);
+            // Do not split an unescaped surrogate pair when converting a
+            // chunk to UTF-8. A one-character gap is flushed before the pair.
+            const end = offset + length;
+            if (end < token.length && /[\uD800-\uDBFF]/u.test(token[end - 1])) length--;
+            buffer += token.slice(offset, offset + length);
+            offset += length;
+            if (buffer.length === JSON_CHUNK_SIZE || length === 0) {
+                yield buffer;
+                buffer = '';
+            }
+        }
+    }
+    if (buffer) yield buffer;
+}
+
+function closeStream (stream, cancellable = null) {
+    return new Promise((resolve, reject) => {
+        stream.close_async(GLib.PRIORITY_DEFAULT, cancellable, (obj, result) => {
+            try {
+                obj.close_finish(result);
+                resolve();
+            } catch (error) {
+                reject(error);
+            }
+        });
+    });
+}
+
 export function decodeEscapedUtf8 (text) {
     return text.replace(escapedByteRun, run => {
         const bytes = Uint8Array.from(
@@ -33,6 +98,7 @@ export class Registry {
     #pendingEntries = null;
     #writeScheduledId = 0;
     #writeInProgress = false;
+    #imageWrites = new Map();
 
     constructor ({ settings, uuid }) {
         this.uuid = uuid;
@@ -73,7 +139,8 @@ export class Registry {
             while (this.#pendingEntries !== null) {
                 const entries = this.#pendingEntries;
                 this.#pendingEntries = null;
-                await this.writeToFile(this.#buildRegistry(entries));
+                const registry = await this.#buildRegistry(entries);
+                await this.writeToFile(registry);
             }
         }
         catch (e) {
@@ -86,8 +153,9 @@ export class Registry {
         }
     }
 
-    #buildRegistry (entries) {
+    async #buildRegistry (entries) {
         const registryContent = [];
+        const imageWrites = [];
 
         for (let entry of entries) {
             const item = {
@@ -103,65 +171,71 @@ export class Registry {
             else if (entry.isImage()) {
                 const filename = this.getEntryFilename(entry);
                 item.contents = filename;
-                this.writeEntryFile(entry);
+                imageWrites.push(this.writeEntryFile(entry));
             }
 
             if (entry.getTag()) item.tag = entry.getTag();
         }
 
+        // Publish image references only after their files are complete.
+        await Promise.all(imageWrites);
         return registryContent;
     }
 
-    writeToFile (registry) {
-        const json = JSON.stringify(registry);
-        const contents = new GLib.Bytes(json);
-
+    async writeToFile (registry) {
         // Make sure dir exists
         GLib.mkdir_with_parents(this.REGISTRY_DIR, parseInt('0775', 8));
 
         const file = Gio.file_new_for_path(this.REGISTRY_PATH);
-        return new Promise((resolve, reject) => {
+        const cancellable = new Gio.Cancellable();
+        const stream = await new Promise((resolve, reject) => {
             file.replace_async(null, false, Gio.FileCreateFlags.NONE,
-                               GLib.PRIORITY_DEFAULT, null, (obj, res) => {
-                let stream;
+                               GLib.PRIORITY_DEFAULT, cancellable, (obj, res) => {
                 try {
-                    stream = obj.replace_finish(res);
+                    resolve(obj.replace_finish(res));
                 }
                 catch (e) {
-                    reject(e);
-                    return;
-                }
-
-                try {
-                    stream.write_bytes_async(contents, GLib.PRIORITY_DEFAULT,
-                                             null, (writeStream, writeResult) => {
-                        try {
-                            writeStream.write_bytes_finish(writeResult);
-                            stream.close(null);
-                            resolve();
-                        }
-                        catch (e) {
-                            try {
-                                stream.close(null);
-                            }
-                            catch {
-                                // Preserve the original write error.
-                            }
-                            reject(e);
-                        }
-                    });
-                }
-                catch (e) {
-                    try {
-                        stream.close(null);
-                    }
-                    catch {
-                        // Preserve the original write error.
-                    }
                     reject(e);
                 }
             });
         });
+
+        try {
+            // Serialization, UTF-8 conversion and I/O are bounded per chunk.
+            // An idle callback alone still freezes Shell if it encodes the
+            // entire multi-megabyte history in a single main-loop iteration.
+            for (const chunk of serializeRegistryChunks(registry)) {
+                const contents = new GLib.Bytes(chunk);
+                let offset = 0;
+                while (offset < contents.get_size()) {
+                    const remaining = GLib.Bytes.new_from_bytes(contents, offset, contents.get_size() - offset);
+                    const written = await new Promise((resolve, reject) => {
+                        stream.write_bytes_async(remaining, GLib.PRIORITY_DEFAULT,
+                                                 cancellable, (obj, result) => {
+                            try {
+                                resolve(obj.write_bytes_finish(result));
+                            }
+                            catch (e) {
+                                reject(e);
+                            }
+                        });
+                    });
+                    if (written <= 0) throw new Error('Clipboard Indicator: empty registry write');
+                    offset += written;
+                }
+            }
+            // Closing a replacement file can flush/fsync and rename it; this
+            // must be asynchronous too, especially on a busy disk.
+            await closeStream(stream, cancellable);
+        } catch (error) {
+            cancellable.cancel();
+            try {
+                await closeStream(stream, cancellable);
+            } catch {
+                // Preserve the original write error.
+            }
+            throw error;
+        }
     }
 
     async read () {
@@ -266,36 +340,45 @@ export class Registry {
     }
 
     getEntryFilename (entry) {
-        return `${this.REGISTRY_DIR}/${entry.asBytes().hash()}`;
+        return `${this.REGISTRY_DIR}/${entry.getHash()}`;
     }
 
-    async writeEntryFile (entry) {
-        if (this.#entryFileExists(entry)) return;
+    writeEntryFile (entry) {
+        const filename = this.getEntryFilename(entry);
+        if (this.#imageWrites.has(filename)) return this.#imageWrites.get(filename);
+        if (this.#entryFileExists(entry)) return Promise.resolve();
 
-        let file = Gio.file_new_for_path(this.getEntryFilename(entry));
-
-        return new Promise(resolve => {
-            file.replace_async(null, false, Gio.FileCreateFlags.NONE,
-                               GLib.PRIORITY_DEFAULT, null, (obj, res) => {
-
-                let stream = obj.replace_finish(res);
-
-                stream.write_bytes_async(entry.asBytes(), GLib.PRIORITY_DEFAULT,
-                                         null, (w_obj, w_res) => {
-
-                    w_obj.write_bytes_finish(w_res);
-                    stream.close(null);
-                    resolve();
+        GLib.mkdir_with_parents(this.REGISTRY_DIR, parseInt('0775', 8));
+        const file = Gio.file_new_for_path(filename);
+        const write = new Promise((resolve, reject) => {
+            file.replace_contents_bytes_async(entry.asBytes(), null, false,
+                Gio.FileCreateFlags.NONE, null, (obj, result) => {
+                    try {
+                        obj.replace_contents_finish(result);
+                        resolve();
+                    } catch (error) {
+                        reject(error);
+                    }
                 });
-            });
-        });
+        }).finally(() => this.#imageWrites.delete(filename));
+        this.#imageWrites.set(filename, write);
+        return write;
     }
 
     async deleteEntryFile (entry) {
         const file = Gio.file_new_for_path(this.getEntryFilename(entry));
 
         try {
-            await file.delete_async(GLib.PRIORITY_DEFAULT, null);
+            await new Promise((resolve, reject) => {
+                file.delete_async(GLib.PRIORITY_DEFAULT, null, (obj, result) => {
+                    try {
+                        obj.delete_finish(result);
+                        resolve();
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
+            });
         }
         catch (e) {
             console.error(e);
@@ -324,6 +407,8 @@ export class Registry {
 export class ClipboardEntry {
     #mimetype;
     #bytes;
+    #nativeBytes = null;
+    #hash = null;
     #favorite;
     #stringValue = null;
     #wasNormalized = false;
@@ -387,37 +472,35 @@ export class ClipboardEntry {
 
     constructor (mimetype, bytes, favorite) {
         this.#mimetype = mimetype;
-        this.#bytes = bytes;
+        if (bytes instanceof GLib.Bytes) {
+            this.#nativeBytes = bytes;
+            this.#bytes = null;
+        } else {
+            this.#bytes = bytes;
+        }
         this.#favorite = favorite;
 
         if (mimetype === 'text/plain') {
-            const decoded = new TextDecoder().decode(bytes);
+            const decoded = new TextDecoder().decode(this.#getData());
             const normalized = decodeEscapedUtf8(decoded);
+            this.#stringValue = normalized;
             if (normalized !== decoded) {
                 this.#bytes = new TextEncoder().encode(normalized);
-                this.#stringValue = normalized;
+                this.#nativeBytes = null;
                 this.#wasNormalized = true;
             }
         }
     }
 
-    #encode () {
-        if (this.isText()) {
-            return this.getStringValue();
-        }
-
-        return [...this.#bytes]
-            .map(x => x.toString(16).padStart(2, '0'))
-            .join('');
+    #getData () {
+        return this.#bytes ?? this.#nativeBytes.get_data();
     }
 
     getStringValue () {
-        if (this.isImage()) {
-            return `[Image ${this.asBytes().hash()}]`;
-        }
-
         if (this.#stringValue === null) {
-            this.#stringValue = new TextDecoder().decode(this.#bytes);
+            this.#stringValue = this.isImage()
+                ? `[Image ${this.getHash()}]`
+                : new TextDecoder().decode(this.#getData());
         }
         return this.#stringValue;
     }
@@ -449,6 +532,8 @@ export class ClipboardEntry {
     setText (text) {
         if (!this.isText()) return;
         this.#bytes = new TextEncoder().encode(text);
+        this.#nativeBytes = null;
+        this.#hash = null;
         this.#stringValue = text;
         this.#wasNormalized = false;
     }
@@ -464,11 +549,22 @@ export class ClipboardEntry {
     }
 
     asBytes () {
-        return GLib.Bytes.new(this.#bytes);
+        this.#nativeBytes ??= GLib.Bytes.new(this.#bytes);
+        return this.#nativeBytes;
+    }
+
+    getHash () {
+        this.#hash ??= this.asBytes().hash();
+        return this.#hash;
     }
 
     equals (otherEntry) {
+        if (this.isImage() || otherEntry.isImage()) {
+            if (!this.isImage() || !otherEntry.isImage()) return false;
+            return this.asBytes().get_size() === otherEntry.asBytes().get_size() &&
+                this.getHash() === otherEntry.getHash() &&
+                this.asBytes().equal(otherEntry.asBytes());
+        }
         return this.getStringValue() === otherEntry.getStringValue();
-        // this.asBytes().equal(otherEntry.asBytes());
     }
 }

@@ -196,6 +196,9 @@ const ClipboardIndicator = GObject.registerClass({
                     this._imagePreviewTimeout = setTimeout(() => {
                         this._buttonImgPreview.set_child(img);
                     }, 0);
+                }).catch(e => {
+                    console.error('Clipboard Indicator: failed to load topbar image');
+                    console.error(e);
                 });
             }
         }
@@ -584,6 +587,9 @@ const ClipboardIndicator = GObject.registerClass({
                 }
                 menuItem.previewImage = img;
                 menuItem.insert_child_below(img, menuItem.label);
+            }).catch(e => {
+                console.error('Clipboard Indicator: failed to load history image');
+                console.error(e);
             });
         }
     }
@@ -1017,8 +1023,6 @@ const ClipboardIndicator = GObject.registerClass({
             this._moveItemFirst(menuItem);
         }
 
-        // Moving the item destroys and recreates its menu actor, so use the
-        // stable menu reference captured before _moveItemFirst().
         menu.close();
     }
 
@@ -1092,6 +1096,20 @@ const ClipboardIndicator = GObject.registerClass({
 
     _moveItemFirst (item) {
         const { entry, currentlySelected } = item;
+        const section = entry.isFavorite() ? this.favoritesSection : this.historySection;
+        if (item.actor.get_parent() === section.box) {
+            // A normal repeat copy only changes order, not the row's content.
+            // Keep its actors, focus, previews and signal connections intact.
+            if (section.firstMenuItem === item) return;
+            section.moveMenuItem(item, 0);
+            const index = this.clipItemsRadioGroup.indexOf(item);
+            this.clipItemsRadioGroup.splice(index, 1);
+            this.clipItemsRadioGroup.push(item);
+            this._updateCache();
+            return;
+        }
+
+        // Pinning/unpinning changes sections and still rebuilds the row.
         this._removeEntry(item, {
             deleteCachedFile: false,
             persist: false,
@@ -1987,10 +2005,9 @@ const ClipboardIndicator = GObject.registerClass({
                     type = "text/plain;charset=utf-8";
                 }
 
-                const entry = new ClipboardEntry(type, bytes.get_data(), false);
-                if (CACHE_IMAGES && entry.isImage()) {
-                    this.registry.writeEntryFile(entry);
-                }
+                // Keep the immutable native buffer. get_data()/asBytes() used
+                // to copy images repeatedly while searching the history.
+                const entry = new ClipboardEntry(type, bytes, false);
                 resolve(entry);
             }));
 
