@@ -2006,9 +2006,9 @@ const ClipboardIndicator = GObject.registerClass({
                     type = "text/plain;charset=utf-8";
                 }
 
-                // Keep the immutable native buffer. get_data()/asBytes() used
-                // to copy images repeatedly while searching the history.
-                const entry = new ClipboardEntry(type, bytes, false);
+                // Retain an owning native reference before the callback ends;
+                // the callback's borrowed wrapper cannot outlive the producer.
+                const entry = ClipboardEntry.fromClipboard(type, bytes);
                 resolve(entry);
             }));
 

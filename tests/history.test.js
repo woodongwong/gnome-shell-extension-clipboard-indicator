@@ -85,3 +85,48 @@ indicator._moveItemFirst(older);
 assert.equal(rebuilt, true);
 assert.equal(writes, 2);
 console.log('history row reuse, recency, selection and pin transition: ok');
+
+// Verify the actual async refresh path acquires ownership inside the native
+// callback, not in the Promise continuation after that callback has returned.
+context.Shell = {Global: {get: () => ({display: {focusWindow: null}})}};
+let callbackLive = false;
+let captures = 0;
+let added;
+const capturedEntry = {isImage: () => false};
+context.ClipboardEntry = {
+    fromClipboard (mimetype, bytes) {
+        assert.equal(callbackLive, true, 'clipboard ownership acquired after callback return');
+        assert.equal(mimetype, 'text/plain;charset=utf-8');
+        assert.equal(bytes.get_size(), 4);
+        captures++;
+        return capturedEntry;
+    },
+};
+const refreshIndicator = new context.Indicator();
+refreshIndicator.clipItemsRadioGroup = [];
+refreshIndicator._addEntry = entry => {
+    assert.equal(callbackLive, false, 'refresh did not cross the async ownership boundary');
+    added = entry;
+};
+refreshIndicator._removeOldestEntries = () => {};
+refreshIndicator._updateCache = () => {};
+refreshIndicator._showNotification = () => {};
+refreshIndicator._blinkIcon = () => {};
+context._ = text => text;
+for (const offeredType of ['text/plain;charset=utf-8', 'UTF8_STRING']) {
+    added = null;
+    refreshIndicator.extension = {clipboard: {
+        get_content (_selection, mimetype, callback) {
+            callbackLive = true;
+            try {
+                callback(null, mimetype === offeredType ? {get_size: () => 4} : null);
+            } finally {
+                callbackLive = false;
+            }
+        },
+    }};
+    await refreshIndicator._refreshIndicator();
+    assert.equal(added, capturedEntry, 'async refresh did not use the owned clipboard entry');
+}
+assert.equal(captures, 2, 'clipboard ownership was not acquired exactly once per copy');
+console.log('clipboard capture owns bytes inside callback before async refresh: ok');

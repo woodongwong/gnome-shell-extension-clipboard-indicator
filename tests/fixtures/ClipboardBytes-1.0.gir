@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<repository version="1.2"
+            xmlns="http://www.gtk.org/introspection/core/1.0"
+            xmlns:c="http://www.gtk.org/introspection/c/1.0"
+            xmlns:glib="http://www.gtk.org/introspection/glib/1.0">
+  <include name="GLib" version="2.0"/>
+  <namespace name="ClipboardBytes" version="1.0"
+             shared-library="libclipboard-bytes.so"
+             c:identifier-prefixes="ClipboardBytes" c:symbol-prefixes="clipboard_bytes">
+    <callback name="Callback" c:type="ClipboardBytesCallback">
+      <return-value transfer-ownership="none"><type name="none" c:type="void"/></return-value>
+      <parameters>
+        <parameter name="bytes" transfer-ownership="none"><type name="GLib.Bytes" c:type="GBytes*"/></parameter>
+        <parameter name="user_data" transfer-ownership="none" nullable="1" closure="1"><type name="gpointer" c:type="gpointer"/></parameter>
+      </parameters>
+    </callback>
+    <function name="deliver" c:identifier="clipboard_bytes_deliver">
+      <return-value transfer-ownership="none"><type name="none" c:type="void"/></return-value>
+      <parameters>
+        <parameter name="callback" transfer-ownership="none" scope="call" closure="1"><type name="Callback" c:type="ClipboardBytesCallback"/></parameter>
+        <parameter name="user_data" transfer-ownership="none" nullable="1"><type name="gpointer" c:type="gpointer"/></parameter>
+      </parameters>
+    </function>
+    <function name="get_releases" c:identifier="clipboard_bytes_get_releases">
+      <return-value transfer-ownership="none"><type name="guint" c:type="guint"/></return-value>
+    </function>
+  </namespace>
+</repository>

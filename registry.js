@@ -423,6 +423,15 @@ export class ClipboardEntry {
             mimetype === 'UTF8_STRING';
     }
 
+    static fromClipboard (mimetype, bytes) {
+        // StClipboard gives the callback a borrowed GBytes. In GJS 1.90 the
+        // wrapper does not own it; St frees it as soon as the callback returns.
+        // A full-range slice owns a reference to the backing bytes without
+        // copying their contents, so Promise continuations/history remain safe.
+        const ownedBytes = GLib.Bytes.new_from_bytes(bytes, 0, bytes.get_size());
+        return new ClipboardEntry(mimetype, ownedBytes, false);
+    }
+
     static async fromJSON (jsonEntry) {
         const mimetype = jsonEntry.mimetype || 'text/plain;charset=utf-8';
         const favorite = jsonEntry.favorite;
