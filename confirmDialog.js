@@ -2,6 +2,7 @@ import St from 'gi://St';
 import GObject from 'gi://GObject';
 import Clutter from 'gi://Clutter';
 import * as ModalDialog from 'resource:///org/gnome/shell/ui/modalDialog.js';
+import { boxLayoutOrientation } from './compat.js';
 
 export class DialogManager {
     #openDialog;
@@ -26,12 +27,12 @@ const ConfirmDialog = GObject.registerClass(
       super._init();
 
       let main_box = new St.BoxLayout({
-        vertical: false
+        ...boxLayoutOrientation(false)
       });
       this.contentLayout.add_child(main_box);
 
       let message_box = new St.BoxLayout({
-        vertical: true
+        ...boxLayoutOrientation(true)
       });
       main_box.add_child(message_box);
 

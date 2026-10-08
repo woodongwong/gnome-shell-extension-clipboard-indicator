@@ -16,7 +16,15 @@ mutter_dir="$(dirname "$mutter_typelib")"
 
 node --input-type=module --check < "$project_dir/registry.js"
 node --input-type=module --check < "$project_dir/extension.js"
+node --input-type=module --check < "$project_dir/confirmDialog.js"
+node --input-type=module --check < "$project_dir/keyboard.js"
+node --input-type=module --check < "$project_dir/compat.js"
+node "$project_dir/tests/compat.test.js"
 node "$project_dir/tests/history.test.js"
 
 GI_TYPELIB_PATH="$gnome_shell_dir:$mutter_dir${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}" \
     gjs -m "$project_dir/tests/registry.test.js"
+
+LD_LIBRARY_PATH="$gnome_shell_dir:$mutter_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+GI_TYPELIB_PATH="$gnome_shell_dir:$mutter_dir${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}" \
+    gjs -m "$project_dir/tests/native-compat.test.js"
